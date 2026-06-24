@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "data-analyst": {
+      "source": "borghei/claude-skills",
+      "sourceType": "github",
+      "skillPath": "data-analytics/data-analyst/SKILL.md",
+      "computedHash": "8feaa945d777e22928bb2b1843fb08b24e53e7b8edbb653aa96b8c495bc2e023"
+    },
+    "pandas-pro": {
+      "source": "jeffallan/claude-skills",
+      "sourceType": "github",
+      "skillPath": "skills/pandas-pro/SKILL.md",
+      "computedHash": "244a87c4e9e20aac2822cdd99a221a7fa6999bf1194abbbd4a5e16bde34bf6ef"
+    }
+  }
+}
