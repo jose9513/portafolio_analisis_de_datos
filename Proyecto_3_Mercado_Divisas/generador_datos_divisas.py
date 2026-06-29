@@ -7,6 +7,7 @@ BLOQUE 2 - El calendario de dias habiles
 BLOQUE 3 - El motor random walk (precio de Cierre por par)
 BLOQUE 4 - Aplicar el motor a los 8 pares
 BLOQUE 5 - Derivar el OHLC (Apertura, Maximo, Minimo) desde el Cierre
+BLOQUE 6 - Volumen sintetico (mas alto en dias de mayor movimiento)
 """
 
 import numpy as np
@@ -53,12 +54,13 @@ def simular_precios(precio_inicial, volatilidad, n_dias, semilla=None):
     return precios
 
 # ====================================================================
-# BLOQUE 4 + 5 - Aplicar el motor a los 8 pares y derivar el OHLC
-#   Apertura = cierre del dia anterior (el dia 1 abre en su precio inicial)
-#   Maximo   = el mayor de (apertura, cierre) + una "mecha" hacia arriba
-#   Minimo   = el menor de (apertura, cierre) - una "mecha" hacia abajo
-#   La mecha es proporcional a la volatilidad del par.
+# BLOQUE 4 + 5 + 6 - Aplicar el motor a los 8 pares, derivar OHLC y volumen
+#   OHLC: apertura = cierre de ayer; maximo/minimo = cuerpo +/- mecha
+#   Volumen = base * (amplificado por el rango del dia) * ruido aleatorio
+#             -> dias mas agitados tienen mas volumen (es una RELACION, no azar puro)
 # ====================================================================
+VOLUMEN_BASE = 1_000_000
+
 def generar_precios(semilla=42):
     np.random.seed(semilla)
     n = len(fechas)
@@ -67,16 +69,19 @@ def generar_precios(semilla=42):
         vol = fila.Volatilidad_Diaria
         cierre = simular_precios(fila.Precio_Inicial, vol, n)
 
-        # Apertura: hoy abre donde cerro ayer
-        apertura = np.empty(n)                 # array vacio del tamano correcto
-        apertura[0] = fila.Precio_Inicial      # el primer dia no tiene "ayer"
-        apertura[1:] = cierre[:-1]             # del 2o dia en adelante: cierre de ayer
+        # OHLC
+        apertura = np.empty(n)
+        apertura[0] = fila.Precio_Inicial
+        apertura[1:] = cierre[:-1]
+        base_alta = np.maximum(apertura, cierre)
+        base_baja = np.minimum(apertura, cierre)
+        maximo = base_alta * (1 + np.random.uniform(0, vol, n))
+        minimo = base_baja * (1 - np.random.uniform(0, vol, n))
 
-        # Maximo / Minimo a partir del cuerpo de la vela (apertura-cierre)
-        base_alta = np.maximum(apertura, cierre)   # el mayor de los dos, dia a dia
-        base_baja = np.minimum(apertura, cierre)   # el menor de los dos, dia a dia
-        maximo = base_alta * (1 + np.random.uniform(0, vol, n))  # mecha hacia arriba
-        minimo = base_baja * (1 - np.random.uniform(0, vol, n))  # mecha hacia abajo
+        # Volumen
+        rango = (maximo - minimo) / apertura          # que tan agitado estuvo el dia (en %)
+        ruido = np.random.uniform(0.7, 1.3, n)        # variacion aleatoria +-30%
+        volumen = (VOLUMEN_BASE * (1 + 50 * rango) * ruido).astype(int)  # operaciones = enteros
 
         df_par = pd.DataFrame({
             "Fecha": fechas,
@@ -85,6 +90,7 @@ def generar_precios(semilla=42):
             "Maximo": maximo,
             "Minimo": minimo,
             "Cierre": cierre,
+            "Volumen": volumen,
         })
         frames.append(df_par)
     return pd.concat(frames, ignore_index=True)
@@ -93,15 +99,18 @@ def generar_precios(semilla=42):
 if __name__ == "__main__":
     precios = generar_precios()
 
-    print("Tabla 'precios' con OHLC (primeras filas de EUR/USD):")
+    print("Tabla 'precios' completa (primeras filas de EUR/USD):")
     print(precios.head().round(4).to_string(index=False))
     print(f"\nForma: {precios.shape[0]} filas x {precios.shape[1]} columnas")
 
-    # VERIFICACION: la ley de hierro del OHLC debe cumplirse SIEMPRE
+    # VERIFICACION 1: ley de hierro del OHLC
     cuerpo_alto = precios[["Apertura", "Cierre"]].max(axis=1)
     cuerpo_bajo = precios[["Apertura", "Cierre"]].min(axis=1)
-    ok_max = (precios["Maximo"] >= cuerpo_alto).all()
-    ok_min = (precios["Minimo"] <= cuerpo_bajo).all()
-    print("\nVerificacion ley OHLC:")
-    print(f"  Maximo siempre >= apertura y cierre: {ok_max}")
-    print(f"  Minimo siempre <= apertura y cierre: {ok_min}")
+    print("\nVerificacion OHLC:")
+    print(f"  Maximo >= cuerpo siempre: {(precios['Maximo'] >= cuerpo_alto).all()}")
+    print(f"  Minimo <= cuerpo siempre: {(precios['Minimo'] <= cuerpo_bajo).all()}")
+
+    # VERIFICACION 2: el volumen debe subir en dias de mayor movimiento
+    rango_check = (precios["Maximo"] - precios["Minimo"]) / precios["Apertura"]
+    corr = rango_check.corr(precios["Volumen"])
+    print(f"\nCorrelacion rango-del-dia vs volumen (debe ser positiva): {corr:.3f}")
