@@ -1,0 +1,1 @@
+Estoy aprendiendo análisis de datos. Explica el razonamiento antes de escribir código, no solo la solución final.
