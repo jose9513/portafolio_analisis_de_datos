@@ -8,6 +8,7 @@ BLOQUE 3 - El motor random walk (precio de Cierre por par)
 BLOQUE 4 - Aplicar el motor a los 8 pares
 BLOQUE 5 - Derivar el OHLC (Apertura, Maximo, Minimo) desde el Cierre
 BLOQUE 6 - Volumen sintetico (mas alto en dias de mayor movimiento)
+BLOQUE 7 - Exportar la tabla final a CSV
 """
 
 import numpy as np
@@ -54,10 +55,7 @@ def simular_precios(precio_inicial, volatilidad, n_dias, semilla=None):
     return precios
 
 # ====================================================================
-# BLOQUE 4 + 5 + 6 - Aplicar el motor a los 8 pares, derivar OHLC y volumen
-#   OHLC: apertura = cierre de ayer; maximo/minimo = cuerpo +/- mecha
-#   Volumen = base * (amplificado por el rango del dia) * ruido aleatorio
-#             -> dias mas agitados tienen mas volumen (es una RELACION, no azar puro)
+# BLOQUE 4 + 5 + 6 - Aplicar el motor, derivar OHLC y volumen
 # ====================================================================
 VOLUMEN_BASE = 1_000_000
 
@@ -69,7 +67,6 @@ def generar_precios(semilla=42):
         vol = fila.Volatilidad_Diaria
         cierre = simular_precios(fila.Precio_Inicial, vol, n)
 
-        # OHLC
         apertura = np.empty(n)
         apertura[0] = fila.Precio_Inicial
         apertura[1:] = cierre[:-1]
@@ -78,19 +75,14 @@ def generar_precios(semilla=42):
         maximo = base_alta * (1 + np.random.uniform(0, vol, n))
         minimo = base_baja * (1 - np.random.uniform(0, vol, n))
 
-        # Volumen
-        rango = (maximo - minimo) / apertura          # que tan agitado estuvo el dia (en %)
-        ruido = np.random.uniform(0.7, 1.3, n)        # variacion aleatoria +-30%
-        volumen = (VOLUMEN_BASE * (1 + 50 * rango) * ruido).astype(int)  # operaciones = enteros
+        rango = (maximo - minimo) / apertura
+        ruido = np.random.uniform(0.7, 1.3, n)
+        volumen = (VOLUMEN_BASE * (1 + 50 * rango) * ruido).astype(int)
 
         df_par = pd.DataFrame({
-            "Fecha": fechas,
-            "Par": fila.Par,
-            "Apertura": apertura,
-            "Maximo": maximo,
-            "Minimo": minimo,
-            "Cierre": cierre,
-            "Volumen": volumen,
+            "Fecha": fechas, "Par": fila.Par,
+            "Apertura": apertura, "Maximo": maximo, "Minimo": minimo,
+            "Cierre": cierre, "Volumen": volumen,
         })
         frames.append(df_par)
     return pd.concat(frames, ignore_index=True)
@@ -99,18 +91,19 @@ def generar_precios(semilla=42):
 if __name__ == "__main__":
     precios = generar_precios()
 
-    print("Tabla 'precios' completa (primeras filas de EUR/USD):")
-    print(precios.head().round(4).to_string(index=False))
+    # Redondeamos los precios a 4 decimales antes de guardar (mas limpio)
+    for col in ["Apertura", "Maximo", "Minimo", "Cierre"]:
+        precios[col] = precios[col].round(4)
+
+    print("Tabla 'precios' completa (primeras filas):")
+    print(precios.head().to_string(index=False))
     print(f"\nForma: {precios.shape[0]} filas x {precios.shape[1]} columnas")
 
-    # VERIFICACION 1: ley de hierro del OHLC
-    cuerpo_alto = precios[["Apertura", "Cierre"]].max(axis=1)
-    cuerpo_bajo = precios[["Apertura", "Cierre"]].min(axis=1)
-    print("\nVerificacion OHLC:")
-    print(f"  Maximo >= cuerpo siempre: {(precios['Maximo'] >= cuerpo_alto).all()}")
-    print(f"  Minimo <= cuerpo siempre: {(precios['Minimo'] <= cuerpo_bajo).all()}")
-
-    # VERIFICACION 2: el volumen debe subir en dias de mayor movimiento
-    rango_check = (precios["Maximo"] - precios["Minimo"]) / precios["Apertura"]
-    corr = rango_check.corr(precios["Volumen"])
-    print(f"\nCorrelacion rango-del-dia vs volumen (debe ser positiva): {corr:.3f}")
+    # ================================================================
+    # BLOQUE 7 - Exportar a CSV
+    #   index=False  -> no guardar la numeracion de filas de pandas
+    #   encoding utf-8 -> que no se rompan acentos ni simbolos
+    # ================================================================
+    SALIDA = "precios_divisas_fake.csv"
+    precios.to_csv(SALIDA, index=False, encoding="utf-8")
+    print(f"\nArchivo guardado: {SALIDA}  ({len(precios)} filas)")
